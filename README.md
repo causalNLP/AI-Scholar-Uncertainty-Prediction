@@ -17,7 +17,7 @@ python train.py --dataset_df_dir data/ --splits_filename train.csv val.csv test.
 To evaluate the trained model on new data, use `eval.py`:
 
 ```bash
-!python eval.py --dataset_df_dir data/ \
+python eval.py --dataset_df_dir data/ \
         --splits_filename test.csv test.csv test.csv --text_col input --y_col label --num_numeric_features 0 \
         --model_load_path models/roberta_large.pt \
         --log_dir log/ \
