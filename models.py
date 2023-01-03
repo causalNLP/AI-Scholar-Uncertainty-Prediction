@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 from torch.nn import functional as F
 from tqdm import tqdm
+from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 from utils import RMSELoss, modify_dict_from_dataparallel
@@ -13,21 +14,36 @@ from sklearn import metrics
 import logging
 log = logging.getLogger('bert_tune')
 
+# common functions for train.py and eval.py
+
+
+def data_preparation(args, log, mode):
+    log.info('Initialize DfModel class and get dataset:')
+    if mode == 'train':
+        if args.dataset_df_path is None:
+            dm = DfModel(args, get_df=False)
+            dataset_df_dir = Path(args.dataset_df_dir)
+            log.info(
+                f'Training set path: {dataset_df_dir / args.splits_filename[0]}')
+            dm.get_df(
+                path_train=f'{dataset_df_dir / args.splits_filename[0]}',
+                path_val=f'{dataset_df_dir / args.splits_filename[1]}',
+                path_test=f'{dataset_df_dir / args.splits_filename[2]}'
+            )
+            return dm
+        elif args.dataset_df_dir is None:
+            dm = DfModel(args)
+            dm.get_df_split(split_portion=args.dataset_split)
+            return dm
+
+    elif mode == 'eval':
+        dm = DfModel(args, get_df=False)
+        return dm
+
 
 def get_tokenizer(pretrained_model):
-    if pretrained_model in ['bert-base-cased', 'bert-base-uncased', 'bert-large-cased', 'bert-large-uncased', 'allenai/scibert_scivocab_uncased']:
-        from transformers import BertTokenizer
-        tokenizer = BertTokenizer.from_pretrained(
-            pretrained_model)
-    elif pretrained_model in ['roberta-base', 'roberta-large']:
-        from transformers import RobertaTokenizerFast
-        tokenizer = RobertaTokenizerFast.from_pretrained(pretrained_model)
-    elif pretrained_model == 'allenai/longformer-base-4096':
-        from transformers import LongformerTokenizer
-        tokenizer = LongformerTokenizer.from_pretrained(pretrained_model)
-    elif pretrained_model in ['microsoft/deberta-v3-large', 'roberta-large-mnli', 'textattack/bert-base-uncased-MNLI']:
-        from transformers import AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
     return tokenizer
 
 
@@ -37,22 +53,13 @@ def get_model(pretrained_model, clf, num_labels=None):
         model = AutoModelForSequenceClassification.from_pretrained(
             pretrained_model)
     else:
-        if pretrained_model in ['bert-base-cased', 'bert-base-uncased', 'bert-large-cased', 'bert-large-uncased', 'allenai/scibert_scivocab_uncased']:
-            from transformers import BertModel
-            model = BertModel.from_pretrained(
-                pretrained_model)
-        elif pretrained_model in ['roberta-base', 'roberta-large']:
-            from transformers import RobertaModel
-            model = RobertaModel.from_pretrained(pretrained_model)
-        elif pretrained_model == 'allenai/longformer-base-4096':
-            from transformers import LongformerModel
-            model = LongformerModel.from_pretrained(pretrained_model)
-        elif pretrained_model in ['microsoft/deberta-v3-large', 'roberta-large-mnli', 'textattack/bert-base-uncased-MNLI']:
-            from transformers import AutoModel
-            model = AutoModel.from_pretrained(pretrained_model,
-                                                num_labels=num_labels,
-                                                output_attentions=False,
-                                                output_hidden_states=False,)
+        if num_labels is None:
+            num_labels = 2
+        from transformers import AutoModel
+        model = AutoModel.from_pretrained(pretrained_model,
+                                          num_labels=num_labels,
+                                          output_attentions=False,
+                                          output_hidden_states=False,)
     return model
 
 
@@ -194,7 +201,7 @@ class Model(torch.nn.Module):
         if args.hidden_dim_curr is None:
             self.l1 = torch.nn.Linear(
                 args.feature_size+args.num_numeric_features, 1)
-                # args.feature_size+args.num_numeric_features, args.num_classes)
+            # args.feature_size+args.num_numeric_features, args.num_classes)
         else:
             self.l1 = _get_module_list(args, output_dim=1)
             # self.l1 = _get_module_list(args, output_dim=args.num_classes)
@@ -265,7 +272,7 @@ class DfModel():
             use_cuda = False
             self.device = torch.device('cpu')
 
-    def get_dataloader(self):
+    def get_dataloader(self, mode='train'):
         log.info('DfModel get_dataloader..')
         if self.args.dataset_class_dir is None:
             DatasetClass = Dataset
@@ -279,21 +286,29 @@ class DfModel():
             spec.loader.exec_module(module)
             DatasetClass = getattr(module, self.args.dataset_class_name)
 
-        self.train_data = DatasetClass(self.df_train, self.args)
-        self.val_data = DatasetClass(self.df_val, self.args)
-        self.test_data = DatasetClass(self.df_test, self.args)
+        if mode == 'eval':
+            self.test_data = DatasetClass(self.df_test, self.args)
+            dataloader_params = self.dataloader_params
+            dataloader_params['shuffle'] = False
+            self.test_loader = torch.utils.data.DataLoader(
+                self.test_data, **dataloader_params)
+            return
+        elif mode == 'train':
+            self.train_data = DatasetClass(self.df_train, self.args)
+            self.val_data = DatasetClass(self.df_val, self.args)
+            self.test_data = DatasetClass(self.df_test, self.args)
 
-        self.train_loader = torch.utils.data.DataLoader(
-            self.train_data, **self.dataloader_params)
+            self.train_loader = torch.utils.data.DataLoader(
+                self.train_data, **self.dataloader_params)
 
-        # help to store csv file in order
-        dataloader_params = self.dataloader_params
-        dataloader_params['shuffle'] = False
+            # help to store csv file in order
+            dataloader_params = self.dataloader_params
+            dataloader_params['shuffle'] = False
 
-        self.val_loader = torch.utils.data.DataLoader(
-            self.val_data, **dataloader_params)
-        self.test_loader = torch.utils.data.DataLoader(
-            self.test_data, **dataloader_params)
+            self.val_loader = torch.utils.data.DataLoader(
+                self.val_data, **dataloader_params)
+            self.test_loader = torch.utils.data.DataLoader(
+                self.test_data, **dataloader_params)
 
     def get_model(self):
         log.info('DfModel get_model..')
@@ -322,7 +337,7 @@ class DfModel():
         self.model.to(self.device)
         # inspect store_csv
         if store_csv:
-            if self.args.numeric_features_col is None:
+            if self.args.numeric_features_col is None or len(self.args.numeric_features_col) == 0:
                 output_df = pd.DataFrame(
                     columns=['data_index', 'y_truth', 'y_pred', self.args.text_col])
             else:
@@ -375,7 +390,7 @@ class DfModel():
                             output_dict['y_truth'] = label[idx, 0].item()
                             output_dict['y_pred'] = preds[idx, 0].item()
                         output_dict[self.args.text_col] = texts[idx]
-                        if self.args.numeric_features_col is not None:
+                        if self.args.numeric_features_col is not None and len(self.args.numeric_features_col) != 0:
                             for feature_idx, feature in enumerate(self.args.numeric_features_col):
                                 output_dict[feature] = numeric[idx,
                                                                feature_idx].item()

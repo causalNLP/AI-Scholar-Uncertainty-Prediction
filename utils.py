@@ -1,6 +1,5 @@
 import sys
 
-
 def plot_heatmap(df, vmin=None, vmax=None, filepath='../heatmap.pdf'):
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -65,7 +64,6 @@ class LoggerWritter:
         self.level(sys.stderr)
 
 # modify state dict from data parallel
-
 
 def modify_dict_from_dataparallel(state_dict, args):
     if args.dataparallel:
