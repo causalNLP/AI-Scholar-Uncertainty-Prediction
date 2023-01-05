@@ -13,9 +13,10 @@ Our trained model can be downloaded from this [google drive link](https://drive.
 To download it to your server using command line, you can use the following command:
 
 ```bash
-cd models/
 file_id="1xJ_5myOvjGKGSH3hGRLd9hu5s50ydhTO"
 wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id=${file_id}' -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=${file_id}" -O trained_scibert_uncertainty.pt && rm -rf /tmp/cookies.txt
+
+mv trained_scibert_uncertainty.pt models/
 ```
 
 ### Step 2) Run the inference mode of the trained model
@@ -25,7 +26,6 @@ We added 10 example data points in [`data/example_data.csv`](data/example_data.c
 You can run our trained model on this example data using the following command:
 
 ```bash
-cd ..
 python eval.py --splits_filename data/example_data.csv
 ```
 
